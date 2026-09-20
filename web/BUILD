@@ -35,6 +35,13 @@ WEB_ITEMS = [
   Copy('$dst/web/script_test.html', '$src/web/script_test.html'),
   Copy('$dst/web/script_test.fs', '$src/web/script_test.fs'),
   Copy('$dst/web/serial.html', '$src/web/serial.html'),
+  Copy('$dst/web/sdl2_breakout.html', '$src/web/sdl2_breakout.html'),
+  Copy('$dst/web/sdl2_breakout.fs', '$src/examples/sdl2_breakout.fs'),
+  Copy('$dst/web/sdl2_drums.html', '$src/web/sdl2_drums.html'),
+  Copy('$dst/web/sdl2_drums.fs', '$src/examples/sdl2_drums.fs'),
+  Copy('$dst/web/sdl2_roguelike.html', '$src/web/sdl2_roguelike.html'),
+  Copy('$dst/web/sdl2_roguelike.fs', '$src/examples/sdl2_roguelike.fs'),
+  Copy('$dst/web/sdl2_tiles.png', '$src/examples/sdl2_tiles.png'),
 ]
 
 if D8_AVAILABLE:

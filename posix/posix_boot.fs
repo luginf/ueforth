@@ -21,6 +21,10 @@ needs ../common/phase_desktop.fs
 needs termios.fs
 needs x11.fs
 needs graphics.fs
+needs sdl2.fs
+needs sdl2_image.fs
+needs sdl2_ttf.fs
+needs sdl2_mixer.fs
 needs sockets.fs
 needs telnetd.fs
 needs httpd.fs

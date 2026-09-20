@@ -18,4 +18,5 @@ needs ../common/ansi.fs
 needs ../common/phase2.fs
 needs ../common/tasks.fs
 needs utils.fs
+needs sdl2.fs
 needs fini.fs

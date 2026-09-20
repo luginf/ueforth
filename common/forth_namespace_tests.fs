@@ -592,6 +592,10 @@ e: test-posix-forth-namespace
   out: httpd 
   out: telnetd 
   out: sockets 
+  out: sdl2-mixer 
+  out: sdl2-ttf 
+  out: sdl2-image 
+  out: sdl2 
   out: x11 
   out: form 
   out: termios 
