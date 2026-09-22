@@ -62,7 +62,8 @@ These words have the same names and stack effects as on Linux, see
 
 ## What is different
 
-* **Not available:** the raw `SDL_` words, `sdl2-ttf` and `sdl2-mixer`, and a
+* **Not available:** the raw `SDL_` words, `sdl2-ttf`, the sound and music
+  files of `sdl2-mixer` (`load-sound`, `play`, `load-music`, `music`...), and a
   few helpers: `wait sdl-error window-handle renderer pen
   pen-r pen-g pen-b pen-a sample-rate`.
 * **`screen`** puts a black layer with its own canvas over the whole page, so
@@ -89,6 +90,17 @@ These words have the same names and stack effects as on Linux, see
   refuse to play sound before. Beeps before that are dropped, and a queue
   more than two seconds long is not extended. A `hit` plays at once over
   the other sounds, with at most 24 sounds alive.
+* **Tunes** (`sdl2-abc`, the reader of ABC notation, see `posix/SDL2.md`) have
+  the same words as on Linux: `abc abc-play abc-loop tune-play tune-loop
+  tune-stop tune-playing? tune-bpm tune-program tune-ms tune-notes`, but there
+  is no MIDI synthesizer or soundfont in a browser. Each note is played by an
+  oscillator (the triangle wave, or the one chosen with `wave`), so the
+  instrument of `%%MIDI program` is ignored, and `tune-midi` and `tune-save`
+  do not exist. `soundfont?` always answers false and `soundfont` does nothing,
+  so a program that names a soundfont runs unchanged; `sdl2-mixer` only exists
+  to be typed and gives `music-volume`. A looping tune waits for the sound to
+  be allowed and starts at its next repeat if it was not yet. Loudness is
+  `music-volume` (0 to 128, as on Linux).
 * **`line`** uses Bresenham's algorithm and may differ by a pixel from the
   SDL one.
 * **`bye`** stops the web interpreter. A game file that ends with `bye`, like
@@ -107,5 +119,7 @@ was checked the same way: a click on the grid switches a step, the buttons
 start and stop the sequencer (sounds are scheduled, several at once), change
 the tempo, clear the grid and quit, and a pad click plays its drum. The roguelike page too: the tile sheet loads
 (64x8), keys and clicks play a turn without reaching the terminal, remembered
-tiles are darker, monsters chase and hurt, Esc closes the screen. Firefox and
+tiles are darker, monsters chase and hurt, Esc closes the screen. Its music was
+checked too: the tune is read (37 notes, 21.8 s at 88 bpm), all its notes are
+scheduled and repeat, `m` stops and restarts it, and Esc stops it. Firefox and
 Safari are not tested.

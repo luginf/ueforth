@@ -25,6 +25,8 @@ needs sdl2.fs
 needs sdl2_image.fs
 needs sdl2_ttf.fs
 needs sdl2_mixer.fs
+needs ../common/abc.fs
+needs sdl2_abc.fs
 needs sockets.fs
 needs telnetd.fs
 needs httpd.fs

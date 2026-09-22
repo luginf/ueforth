@@ -50,13 +50,19 @@ r~
   };
   S.ensureAudio = function() {
     if (S.ac) {
-      if (S.ac.state === 'suspended') { S.ac.resume(); }
+      if (S.ac.state === 'suspended') {
+        var pr = S.ac.resume();
+        if (pr) {
+          if (pr.then) { pr.then(function() { if (S.tuneRestart) { S.tuneRestart(); } }); }
+        }
+      }
       return;
     }
     var AC = window.AudioContext ? window.AudioContext : window.webkitAudioContext;
     if (AC) { S.ac = new AC(); }
   };
   S.silence = function() {
+    if (S.tuneStop) { S.tuneStop(); }
     for (var i = 0; i < S.nodes.length; ++i) {
       try { S.nodes[i].stop(); } catch (e) {}
     }
@@ -464,6 +470,10 @@ JSWORD: js-hit { freq ms w vol fall }
 JSWORD: silence { }
   context.sdl.silence();
 ~
+2500 value tune-level   ( amplitude of the notes of a tune, 0 to 32767 )
+: music-volume ( 0..128 -- ) 2500 * 128 / to tune-level ;
+: soundfont? ( a n -- f ) 2drop 0 ;   ( a browser has no soundfont: tunes use oscillators )
+: soundfont ( a n -- ) 2drop ;
 JSWORD: beeping? { -- f }
   var S = context.sdl;
   return (S.ac && Math.max(S.beepEnd, S.hitEnd) > S.ac.currentTime) ? -1 : 0;
@@ -530,3 +540,4 @@ previous previous previous
 sdl2 definitions
 | evaluate ;
 : sdl2-image ( -- ) sdl2 ;   ( the image words are part of sdl2 here )
+: sdl2-mixer ( -- ) sdl2 ;   ( music and soundfont words, see sdl2-abc for tunes )

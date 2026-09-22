@@ -25,14 +25,24 @@
 \   arrows or w a s d    move; walk into a monster to hit it
 \   space or .           wait a turn (or start again after dying)
 \   click                step toward the tile you click
+\   m                    music on or off
 \   esc                  quit
 \ Bottom bar: your health (hearts), the stairs icon and the depth.
 \ Green potions heal, the blue stairs lead one level deeper, the screen flashes
 \ red when you are hurt. Tiles you saw but cannot see now are drawn darker.
 \ Needs libSDL2 and libSDL2_image on Linux.
+\
+\ Music: two short tunes written in ABC notation (the text format of
+\ abcnotation.com) below, played by sdl2-abc. On Linux they are played as MIDI
+\ through SDL2_mixer, with the soundfont sdl2_roguelike.sf2 if you put one
+\ beside this file (any General MIDI .sf2 or .sf3, renamed), else the one of
+\ the system. In the browser a simple synthesizer plays them. If nothing can
+\ play them the game stays silent.
 
 sdl2
 sdl2-image
+sdl2-mixer
+sdl2-abc
 
 40 constant map-w   24 constant map-h   8 constant tile   map-w map-h * constant area
 create map area allot      ( 0 wall, 1 floor, 2 stairs, 3 potion )
@@ -44,8 +54,36 @@ create was 256 allot   was 256 erase
 
 0 value rooms   0 value mons
 0 value px   0 value py   0 value hp   10 constant max-hp
-0 value level   0 value dead   0 value flash
+0 value level   0 value dead   0 value flash   -1 value music-on
 0 value rng   0 value repeat-at   0 value was-click
+
+( ---- Music, in ABC notation ---- )
+: theme r~ X:1
+T:Crypt
+M:4/4
+L:1/8
+Q:1/4=88
+K:Am
+%%MIDI program 46
+"Am"A,2 [A,C]2 E2 [A,C]2 | "F"F,2 [F,A,]2 C2 [F,A,]2 |
+"G"G,2 [G,B,]2 D2 [G,B,]2 | "E"E,2 [E,^G,]2 B,2 [E,^G,]2 |
+A2 c2 e2 c2 | f2 a2 c'2 a2 | g2 e2 d2 B2 | A6 z2 |
+~ ;
+: dirge r~ X:2
+T:Dirge
+M:4/4
+L:1/4
+Q:1/4=72
+K:Am
+%%MIDI program 48
+c B A ^G | A3 z | [A,,E,A,]4 |
+~ ;
+
+: no-music ( a n -- )   ." (no music: the tune could not be played)" cr 2drop ;
+: start-theme  music-on if theme ['] abc-loop catch if no-music then then ;
+: start-dirge  music-on if dirge ['] abc-play catch if no-music then then ;
+: toggle-music
+  music-on if 0 to music-on tune-stop else -1 to music-on start-theme then ;
 
 ( ---- Random numbers and map access ---- )
 : rnd ( n -- 0..n-1 )
@@ -145,7 +183,7 @@ create was 256 allot   was 256 erase
 ( ---- Turns ---- )
 : hurt ( n -- )
   negate +to hp   6 to flash   120 100 beep
-  hp 1 < if 1 to dead   220 200 beep   165 300 beep then ;
+  hp 1 < if 1 to dead   start-dirge then ;
 
 : mon-step { i nx ny }   ( moves a monster when the way is free )
   nx ny tile@ 0= if 0 exit then
@@ -172,7 +210,7 @@ create was 256 allot   was 256 erase
 
 : new-game
   1 to level   max-hp to hp   0 to dead   0 to flash
-  ticks to rng   start-level ;
+  ticks to rng   start-level   start-theme ;
 
 : next-level
   1 +to level   hp 3 + max-hp min to hp   start-level
@@ -202,7 +240,7 @@ create was 256 allot   was 256 erase
 : note-key ( k -- ) dup pressed? swap 255 and was + c! ;
 : note-keys
   key-left note-key  key-right note-key  key-up note-key  key-down note-key
-  key-space note-key  [char] . note-key
+  key-space note-key  [char] . note-key  [char] m note-key
   [char] a note-key  [char] d note-key  [char] w note-key  [char] s note-key ;
 
 : key-step? ( k -- f )   ( pressed now, or held long enough to repeat )
@@ -212,6 +250,7 @@ create was 256 allot   was 256 erase
   ticks 90 + to repeat-at -1 ;
 
 : handle-keys
+  [char] m edge? if toggle-music then
   dead if
     key-space edge? if new-game then
     note-keys exit
@@ -309,8 +348,10 @@ create digit-bits
 
 : run ( -- ) begin step quit? until tiles free-image close-screen ;
 
-." arrows or wasd: move and hit  space: wait  click: step  esc: quit" cr
+." arrows or wasd: move and hit  space: wait  click: step  m: music  esc: quit" cr
 3 to zoom
+s" sdl2_roguelike.sf2" soundfont? drop
+60 music-volume
 320 208 screen
 s" Roguelike" title
 s" examples/sdl2_tiles.png" load-image to tiles

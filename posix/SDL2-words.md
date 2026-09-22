@@ -4,7 +4,7 @@ Every word of the `sdl2` vocabulary, for the POSIX build (`out/posix/ueforth`).
 For a tour with examples read [SDL2.md](SDL2.md) first. This page is the
 complete list.
 
-The words come from four loaders, each loading its source the first time it
+The words come from five loaders, each loading its source the first time it
 is typed. They all add to the same `sdl2` vocabulary:
 
 | Loader | Library | Section |
@@ -13,6 +13,7 @@ is typed. They all add to the same `sdl2` vocabulary:
 | `sdl2-image` | `libSDL2_image-2.0.so.0` | [Images](#images-sdl2-image) |
 | `sdl2-ttf` | `libSDL2_ttf-2.0.so.0` | [Text](#text-sdl2-ttf) |
 | `sdl2-mixer` | `libSDL2_mixer-2.0.so.0` | [Sound](#sound-sdl2-mixer) |
+| `sdl2-abc` | (loads `sdl2-mixer`) | [Tunes](#tunes-sdl2-abc) |
 
 Stack notation: `x y` are pixel coordinates, `w h` sizes, `a n` a Forth string
 (address, length), `z` a zero terminated C string, `f` a flag, `$rrggbb` a color.
@@ -228,6 +229,7 @@ Used by the words above. Listed because they are in the vocabulary and can hide 
 | `noise-sample` | `( -- n )` | Next noise sample. |
 | `wave-sample` | `( phase -- n )` | Sample of the current `wave` at phase 0 to 65535. |
 | `fill-beep` | `( freq n buf -- )` | Write n samples of a tone into buf, with a short fade out. |
+| `base-name` | `( a n -- a' n' )` | A file name without its directories. |
 | `audio-hook` | `( -- xt )` | Value. Optional xt run by `flip` and `delay`; it is set to `pump`. |
 | `run-audio-hook` | `( -- )` | Run `audio-hook` if set. |
 | `#voices` | `( -- 8 )` | Constant. Number of hits that can play at once. |
@@ -274,7 +276,6 @@ Type `sdl2-image` once, then load images after `screen`.
 | Word | Stack | What it does |
 |------|-------|--------------|
 | `try-image` | `( a n -- img, or 0 )` | Load a texture from a file name, 0 when it fails. |
-| `base-name` | `( a n -- a' n' )` | A file name without its directories. |
 | `srect` | `( -- a )` | Source `SDL_Rect` buffer used by `draw-part`. |
 | `isize` | `( -- a )` | 8 byte buffer used by `image-size`. |
 
@@ -317,6 +318,8 @@ Type `sdl2-mixer` once. Not to be confused with `beep`, which is in the core.
 
 | Word | Stack | What it does |
 |------|-------|--------------|
+| `soundfont` | `( a n -- )` | Use a soundfont file (.sf2 or .sf3) for MIDI music. The name is tried as given, then without its directories in the current directory, then in the directory of the script, so a soundfont put beside the program is found from anywhere. Throws if not found. Without it FluidSynth uses the soundfont of the system. |
+| `soundfont?` | `( a n -- f )` | Same, but returns a flag instead of throwing: true when the file was found and set. |
 | `load-sound` | `( a n -- snd )` | Load a WAV, OGG, MP3 or FLAC effect. Opens the mixer the first time. Throws on failure. |
 | `play` | `( snd -- )` | Play the sound on a free channel. Sounds overlap and are mixed. |
 | `free-sound` | `( snd -- )` | Free the sound. |
@@ -357,17 +360,66 @@ Type `sdl2-mixer` once. Not to be confused with `beep`, which is in the core.
 | `Mix_HaltMusic` | `( -- n )` | 0 |
 | `Mix_VolumeMusic` | `( n -- n )` | 1 |
 | `Mix_PlayingMusic` | `( -- n )` | 0 |
+| `Mix_SetSoundFonts` | `( z -- n )` | 1 |
 
 ### Internal words (sound)
 
 | Word | Stack | What it does |
 |------|-------|--------------|
+| `path-buf` | `( -- a )` | 512 byte buffer holding the name found beside the script. |
+| `beside-script` | `( a n -- a' n' f )` | The file name in the directory of the running script; f is true when that file exists. |
+| `find-file` | `( a n -- a' n' f )` | Look for a file as given, then by its name alone in the current directory, then beside the script. |
 | `mixer-init` | `( -- )` | Open the mixer at 44100 Hz, 16 bit, stereo, if not already open. |
 | `mixer-open?` | `( -- f )` | True when the mixer is open. |
 | `mixer-open` | `( -- n )` | Value. Mixer open flag. |
 | `mixer-close` | `( -- )` | Close the mixer. Installed in `close-hook`. |
 
+## Tunes (sdl2-abc)
+
+Type `sdl2-abc` once (it loads `sdl2-mixer` if needed). A tune written in ABC notation (see abcnotation.com) is read, turned into a MIDI file in a temporary file (deleted once loaded) and played by SDL2_mixer through FluidSynth, with the soundfont given by `soundfont` or the one of the system. The same words exist in the web build, where simple oscillators play the notes.
+
+| Word | Stack | What it does |
+|------|-------|--------------|
+| `abc` | `( a n -- )` | Read a tune written in ABC notation (a string, several lines). Understood: the fields K: (key and mode), L:, M:, Q:, the line `%%MIDI program n`; notes `A`-`G` and `a`-`g` with `^ _ =` and `, '`, lengths like `2`, `/2`, `3/2`; rests `z x`; chords `[CEG]`; ties `-`; broken rhythm `> <`; tuplets `(3`; bar lines. Words, decorations, grace notes, repeats, voices and other fields are skipped: one voice, a melody line. Sets `tune-bpm` and `tune-program` from the tune. Use `r~ ... ~` for a multi-line string, as ABC uses the bar character. |
+| `tune-play` | `( -- )` | Play the tune read by `abc` once, as MIDI through the soundfont. |
+| `tune-loop` | `( -- )` | Play it again and again until `tune-stop`. |
+| `tune-stop` | `( -- )` | Stop the tune. |
+| `tune-playing?` | `( -- f )` | True while the tune plays. |
+| `abc-play` | `( a n -- )` | `abc` then `tune-play`. |
+| `abc-loop` | `( a n -- )` | `abc` then `tune-loop`. |
+| `tune-notes` | `( -- n )` | Number of notes of the tune (each note of a chord counts). At most 1024 are kept. |
+| `tune-ms` | `( -- ms )` | Length of the tune in milliseconds at `tune-bpm`. |
+| `tune-bpm` | `( -- n )` | Value. Quarter notes per minute, set by `Q:` (default 120). Change it after `abc` to play faster or slower. |
+| `tune-program` | `( -- n )` | Value. General MIDI instrument 0 to 127, set by `%%MIDI program` (default 0). Change it after `abc` to choose another. |
+| `tune-midi` | `( -- a n )` | The tune as the bytes of a standard MIDI file (format 0, 480 ticks per quarter note). |
+| `tune-save` | `( a n -- )` | Write the tune as a `.mid` file with that name. |
+
+### Internal words (tunes)
+
+The reader itself lives in the vocabulary `abc-int`, which is not searched by default.
+
+| Word | Stack | What it does |
+|------|-------|--------------|
+| `abc-int` | `( -- )` | Vocabulary holding the reader of ABC notation: about 80 words (`token`, `note`, `chord`, `read-key`, the arrays `nt nd nk` of the notes...). Kept apart so they do not hide your own names; `also abc-int words` lists them. |
+| `smf` | `( -- a )` | 32 KB buffer where the MIDI file is built. |
+| `smf-n` | `( -- n )` | Value. Bytes written in `smf`. |
+| `smf-t` | `( -- n )` | Value. Time of the last event written, in ticks. |
+| `smf-len` | `( -- n )` | Value. Where the length of the track is written. |
+| `sb,` | `( byte -- )` | Append a byte to the MIDI file. |
+| `sbe32,` | `( n -- )` | Append a 32 bit number, most significant byte first. |
+| `(vlq)` | `( n flag -- )` | Append a variable length number, high groups first. |
+| `vlq,` | `( n -- )` | Append a MIDI variable length number. |
+| `emit-group` | `( first -- next )` | Write the notes that start together: all on, then all off. |
+| `build-smf` | `( -- )` | Build the MIDI file of the tune in `smf`. |
+| `tune-music` | `( -- mus )` | Value. The music being played, 0 for none. |
+| `tune-path` | `( -- a n )` | Make a new empty file with a name of its own in `/tmp` (with `mkstemps`, so it cannot clash with another user or run) and give its name. |
+| `tune-load` | `( -- )` | Write the MIDI file to a temporary file, load it as music and delete the file. |
+| `c-mkstemps` | `( z n -- n )` | C `mkstemps`: makes a unique file from a template ending in XXXXXX. |
+| `c-close` | `( n -- n )` | C `close`. |
+| `tmpl` | `( -- a )` | 64 byte buffer for the template and name of the temporary file. |
+| `tune-code` | `( -- n )` | Value. Error code kept while the temporary file is deleted. |
+
 ## Alphabetical index
 
-`alpha` `audio-open` `audio-open?` `beep` `beep-volume` `beeping?` `black` `blue` `box` `brown` `circle` `close-screen` `cls` `color` `cursor` `cyan` `delay` `disc` `dot` `draw` `draw-part` `draw-size` `dt` `events` `flip` `font` `frame` `free-font` `free-image` `free-music` `free-sound` `fullscreen` `gray` `green` `height` `hit` `hline` `image-alpha` `image-size` `image-tint` `IMG_LoadTexture` `key-backspace` `key-down` `key-enter` `key-esc` `key-left` `key-right` `key-space` `key-tab` `key-up` `last-key` `LEFT-BUTTON` `line` `load-font` `load-image` `load-music` `load-sound` `magenta` `MIDDLE-BUTTON` `Mix_CloseAudio` `Mix_FreeChunk` `Mix_FreeMusic` `Mix_HaltChannel` `Mix_HaltMusic` `Mix_LoadMUS` `Mix_LoadWAV_RW` `Mix_OpenAudio` `Mix_PlayChannelTimed` `Mix_Playing` `Mix_PlayingMusic` `Mix_PlayMusic` `Mix_Volume` `Mix_VolumeMusic` `mouse-x` `mouse-y` `music` `music-once` `music-volume` `music?` `orange` `pen` `pen-a` `pen-b` `pen-g` `pen-r` `pink` `pitch-drop` `pixel@` `play` `pressed?` `purple` `quit!` `quit?` `red` `renderer` `rgb` `rgba` `RIGHT-BUTTON` `sample-rate` `screen` `screen-open?` `sdl` `sdl-error` `sdl-shutdown` `SDL_ClearQueuedAudio` `SDL_CloseAudioDevice` `SDL_CreateRenderer` `SDL_CreateTexture` `SDL_CreateTextureFromSurface` `SDL_CreateWindow` `SDL_Delay` `SDL_DestroyRenderer` `SDL_DestroyTexture` `SDL_DestroyWindow` `SDL_FreeSurface` `SDL_GetError` `SDL_GetKeyboardState` `SDL_GetMouseState` `SDL_GetQueuedAudioSize` `SDL_GetTicks` `SDL_Init` `SDL_InitSubSystem` `SDL_OpenAudioDevice` `SDL_PauseAudioDevice` `SDL_PollEvent` `SDL_PushEvent` `SDL_QueryTexture` `SDL_QueueAudio` `SDL_RenderClear` `SDL_RenderCopy` `SDL_RenderDrawLine` `SDL_RenderDrawPoint` `SDL_RenderDrawRect` `SDL_RenderFillRect` `SDL_RenderPresent` `SDL_RenderReadPixels` `SDL_RenderSetLogicalSize` `SDL_RWFromFile` `SDL_SetHint` `SDL_SetRenderDrawBlendMode` `SDL_SetRenderDrawColor` `SDL_SetTextureAlphaMod` `SDL_SetTextureBlendMode` `SDL_SetTextureColorMod` `SDL_SetWindowFullscreen` `SDL_SetWindowTitle` `SDL_ShowCursor` `SDL_UpdateTexture` `SDL_WaitEvent` `sdlimg` `sdlmix` `sdlttf` `silence` `sound-volume` `sounds-playing` `stop-music` `stop-sounds` `text` `text-size` `ticks` `title` `TTF_CloseFont` `TTF_Init` `TTF_OpenFont` `TTF_Quit` `TTF_RenderUTF8_Blended` `TTF_SizeUTF8` `wait` `wave` `wheel` `white` `width` `window-handle` `yellow` `zoom`
+`abc` `abc-loop` `abc-play` `alpha` `audio-open` `audio-open?` `beep` `beep-volume` `beeping?` `black` `blue` `box` `brown` `c-close` `c-mkstemps` `circle` `close-screen` `cls` `color` `cursor` `cyan` `delay` `disc` `dot` `draw` `draw-part` `draw-size` `dt` `events` `flip` `font` `frame` `free-font` `free-image` `free-music` `free-sound` `fullscreen` `gray` `green` `height` `hit` `hline` `image-alpha` `image-size` `image-tint` `IMG_LoadTexture` `key-backspace` `key-down` `key-enter` `key-esc` `key-left` `key-right` `key-space` `key-tab` `key-up` `last-key` `LEFT-BUTTON` `line` `load-font` `load-image` `load-music` `load-sound` `magenta` `MIDDLE-BUTTON` `Mix_CloseAudio` `Mix_FreeChunk` `Mix_FreeMusic` `Mix_HaltChannel` `Mix_HaltMusic` `Mix_LoadMUS` `Mix_LoadWAV_RW` `Mix_OpenAudio` `Mix_PlayChannelTimed` `Mix_Playing` `Mix_PlayingMusic` `Mix_PlayMusic` `Mix_SetSoundFonts` `Mix_Volume` `Mix_VolumeMusic` `mouse-x` `mouse-y` `music` `music-once` `music-volume` `music?` `orange` `pen` `pen-a` `pen-b` `pen-g` `pen-r` `pink` `pitch-drop` `pixel@` `play` `pressed?` `purple` `quit!` `quit?` `red` `renderer` `rgb` `rgba` `RIGHT-BUTTON` `sample-rate` `screen` `screen-open?` `sdl` `sdl-error` `sdl-shutdown` `SDL_ClearQueuedAudio` `SDL_CloseAudioDevice` `SDL_CreateRenderer` `SDL_CreateTexture` `SDL_CreateTextureFromSurface` `SDL_CreateWindow` `SDL_Delay` `SDL_DestroyRenderer` `SDL_DestroyTexture` `SDL_DestroyWindow` `SDL_FreeSurface` `SDL_GetError` `SDL_GetKeyboardState` `SDL_GetMouseState` `SDL_GetQueuedAudioSize` `SDL_GetTicks` `SDL_Init` `SDL_InitSubSystem` `SDL_OpenAudioDevice` `SDL_PauseAudioDevice` `SDL_PollEvent` `SDL_PushEvent` `SDL_QueryTexture` `SDL_QueueAudio` `SDL_RenderClear` `SDL_RenderCopy` `SDL_RenderDrawLine` `SDL_RenderDrawPoint` `SDL_RenderDrawRect` `SDL_RenderFillRect` `SDL_RenderPresent` `SDL_RenderReadPixels` `SDL_RenderSetLogicalSize` `SDL_RWFromFile` `SDL_SetHint` `SDL_SetRenderDrawBlendMode` `SDL_SetRenderDrawColor` `SDL_SetTextureAlphaMod` `SDL_SetTextureBlendMode` `SDL_SetTextureColorMod` `SDL_SetWindowFullscreen` `SDL_SetWindowTitle` `SDL_ShowCursor` `SDL_UpdateTexture` `SDL_WaitEvent` `sdlimg` `sdlmix` `sdlttf` `silence` `sound-volume` `soundfont` `soundfont?` `sounds-playing` `stop-music` `stop-sounds` `text` `text-size` `ticks` `title` `TTF_CloseFont` `TTF_Init` `TTF_OpenFont` `TTF_Quit` `TTF_RenderUTF8_Blended` `TTF_SizeUTF8` `tune-bpm` `tune-loop` `tune-midi` `tune-ms` `tune-notes` `tune-play` `tune-playing?` `tune-program` `tune-save` `tune-stop` `wait` `wave` `wheel` `white` `width` `window-handle` `yellow` `zoom`
 

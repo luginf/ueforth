@@ -15,7 +15,11 @@ run
 See `examples/sdl2_demo.fs` for a small tour of the words,
 `examples/sdl2_breakout.fs` for a complete game (breakout, about 200 lines)
 `examples/sdl2_drums.fs` for a minimal drum machine (16 steps, 4 drums,
-all of it usable with the mouse, or with the keyboard) and
+all of it usable with the mouse, or with the keyboard),
+`examples/sdl2_pianoroll.fs` for a minimal piano-roll sequencer (4 tracks with
+their own instrument, 16-step patterns that chain into a longer song, a MIDI
+soundfont for playback, export to `.mid` and to ABC notation; POSIX only,
+since it needs the soundfont and writes files) and
 `examples/sdl2_roguelike.fs` for a minimal roguelike drawn from a tile sheet
 (`examples/sdl2_tiles.png`, 8 tiles of 8x8, loaded with `sdl2-image` and
 drawn with `draw-part`; `examples/make_sdl2_tiles.fs`, itself a ueforth program, draws that sheet, and
@@ -34,7 +38,8 @@ in a browser too: see [../web/SDL2.md](../web/SDL2.md).
 | `sdl2`        | libSDL2-2.0.so.0     | `libsdl2-2.0-0`        | window, drawing, input, beeps |
 | `sdl2-image`  | libSDL2_image-2.0.so.0 | `libsdl2-image-2.0-0` | sprites (PNG, JPG, BMP...)  |
 | `sdl2-ttf`    | libSDL2_ttf-2.0.so.0 | `libsdl2-ttf-2.0-0`    | text with TrueType fonts    |
-| `sdl2-mixer`  | libSDL2_mixer-2.0.so.0 | `libsdl2-mixer-2.0-0` | sound files, music, mixing  |
+| `sdl2-mixer`  | libSDL2_mixer-2.0.so.0 | `libsdl2-mixer-2.0-0` | sound files, music, mixing, soundfont |
+| `sdl2-abc`    | (`sdl2-mixer`, and a soundfont for MIDI) | `fluid-soundfont-gm` or your own `.sf2` | tunes in ABC notation |
 
 The loaders are ordinary words that load their source on first use,
 like `x11` does. Typing one again just puts `sdl2` back on top.
@@ -96,6 +101,64 @@ directories that is not found is tried again without them, so
 `music ( mus -- )` (loops), `music-once`, `stop-music`, `music-volume`,
 `music?`, `free-music`. Overlapping sounds are mixed.
 
+Music files can be OGG, MP3, FLAC, Opus, WAV, MOD (and XM, S3M, IT) and MIDI,
+as far as the SDL2_mixer of your system has the decoders (checked here with
+SDL2_mixer 2.8.0, which links libmodplug, FluidSynth, vorbis, mpg123, FLAC and
+opusfile). A MIDI file is played by FluidSynth, which needs a soundfont:
+`soundfont ( a n -- )` sets one, a `.sf2` or `.sf3` file, and `soundfont?`
+does the same and returns a flag instead of throwing. The name is tried as
+given, then by its file name alone in the current directory, then in the
+directory of the running script, so a soundfont placed beside the program is
+found from anywhere: `s" mygame.sf2" soundfont`. Without one, FluidSynth uses
+the soundfont of the system, when there is one.
+
+## Tunes (`sdl2-abc`)
+
+Tunes written in [ABC notation](https://abcnotation.com/), a text format for
+melodies, can be played with the soundfont. Type `sdl2-abc` once (it loads
+`sdl2-mixer` if needed). Since ABC uses the bar character, write the tune with
+`r~ ... ~`, a multi-line string that ends at a tilde:
+
+```forth
+sdl2-abc
+s" gm.sf2" soundfont?  drop        \ optional, a soundfont beside the program
+: tune r~ X:1
+T:Scale
+M:4/4
+L:1/4
+Q:1/4=120
+K:C
+%%MIDI program 0
+C D E F | [CEG]2 z2 |
+~ ;
+tune abc-play                      \ once; abc-loop repeats; tune-stop stops
+```
+
+`abc ( a n -- )` reads the tune, `tune-play`, `tune-loop`, `tune-stop` and
+`tune-playing?` play it, `abc-play` and `abc-loop` do both. After `abc` you can
+change `tune-bpm` and `tune-program` (the General MIDI instrument), read
+`tune-ms` and `tune-notes`, or get the MIDI file with `tune-midi` or
+`tune-save`. The tune is written as a standard MIDI file in a temporary file of its own in
+`/tmp` (deleted once loaded) and played by SDL2_mixer, so anything that plays
+`.mid` also plays it.
+
+What is understood: the fields `K:` (key and mode, so `K:G` sharpens F,
+`K:Dm` flattens B), `L:`, `M:` (only to choose the default note length), `Q:`
+(`Q:1/4=120`, `Q:3/8=60` or `Q:120`) and the line `%%MIDI program n`; the notes
+`A` to `G` and `a` to `g`, the accidentals `^ _ =` (lasting until the bar
+line), the octave marks `,` and `'`, lengths such as `2`, `/2`, `3/2`, `//`;
+rests `z` and `x`; chords `[CEG]`; ties `-`; broken rhythm `>` and `<`;
+tuplets `(3`; bar lines. Chord symbols in quotes, decorations `!..!`, grace
+notes `{..}`, comments, lyrics and the other fields are skipped. Not
+understood: repeats and endings (a tune plays straight through), several
+voices (a melody line only), tempo changes inside the tune. At most 1024 notes
+are kept. The reader itself is in the vocabulary `abc-int`.
+
+The same words exist in the web build, with a simple synthesizer in place of
+MIDI (see [../web/SDL2.md](../web/SDL2.md)), so a program can play its tunes
+in both. `examples/sdl2_roguelike.fs` does: two short tunes written in ABC, and
+the key `m` to switch the music off.
+
 ## Limits
 
 * Calls only pass integers and pointers. SDL functions that take floats or
@@ -119,7 +182,11 @@ They need the libraries, so they are not part of `ninja posix`:
 ```sh
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy out/posix/ueforth posix/sdl2_tests.fs
 SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy out/posix/ueforth posix/sdl2_media_tests.fs
+SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy out/posix/ueforth posix/sdl2_abc_tests.fs
 ```
 
 The `dummy` drivers run without a screen or a sound card; pixels are read
-back with `SDL_RenderReadPixels`.
+back with `SDL_RenderReadPixels`. The ABC tests check the notes, the MIDI file
+and the file lookup; that MIDI music really sounds was checked by recording the
+output of SDL with its `disk` audio driver (`SDL_AUDIODRIVER=disk
+SDL_DISKAUDIOFILE=out.raw`, 16 bit stereo at 44100 Hz), not by listening.

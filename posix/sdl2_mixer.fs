@@ -19,6 +19,7 @@
 \   s" boom.wav" load-sound constant boom
 \   boom play                      \ overlapping sounds are mixed
 \   s" theme.ogg" load-music music \ loops until stop-music
+\   s" gm.sf2" soundfont           \ soundfont for MIDI files, put beside the program
 \ Sounds can be WAV, OGG, MP3, FLAC depending on the installed decoders.
 \ NOTE: the block below is a string, so it must not contain a vertical bar.
 
@@ -42,6 +43,7 @@ z" Mix_PlayMusic" 2 sdlmix Mix_PlayMusic ( a n -- n )
 z" Mix_HaltMusic" 0 sdlmix Mix_HaltMusic ( -- n )
 z" Mix_VolumeMusic" 1 sdlmix Mix_VolumeMusic ( n -- n )
 z" Mix_PlayingMusic" 0 sdlmix Mix_PlayingMusic ( -- n )
+z" Mix_SetSoundFonts" 1 sdlmix Mix_SetSoundFonts ( z -- n )
 
 44100 constant MIX_RATE
 2 constant MIX_CHANNELS
@@ -76,6 +78,30 @@ z" Mix_PlayingMusic" 0 sdlmix Mix_PlayingMusic ( -- n )
 : stop-music ( -- ) Mix_HaltMusic drop ;
 : music-volume ( 0..128 -- ) Mix_VolumeMusic drop ;
 : music? ( -- f ) Mix_PlayingMusic sign-extend 0<> ;
+
+( ---- Soundfont for MIDI music, a file that FluidSynth reads ---- )
+create path-buf 512 allot
+: beside-script ( a n -- a' n' f )   ( the file name, in the directory of the script )
+  { a n }
+  argc 2 < if a n 0 exit then
+  1 argv { sa sn }
+  sa sn base-name nip  sn swap - { dn }
+  dn 0= if a n 0 exit then
+  a n base-name { ba bn }
+  dn bn + 511 > if a n 0 exit then
+  sa path-buf dn cmove   ba path-buf dn + bn cmove
+  path-buf dn bn +  2dup file-exists? ;
+: find-file ( a n -- a' n' f )   ( as given, else in the current directory, else beside the script )
+  { a n }
+  a n file-exists? if a n -1 exit then
+  a n base-name { b m }
+  b m file-exists? if b m -1 exit then
+  a n beside-script ;
+: soundfont? ( a n -- f )   ( uses a soundfont for MIDI files if the file is found )
+  find-file 0= if 2drop 0 exit then
+  s>z Mix_SetSoundFonts sign-extend 0 <> ;
+: soundfont ( a n -- )
+  2dup soundfont? 0= if ." soundfont not found: " type cr -1 throw then 2drop ;
 
 : mixer-close ( -- )
   mixer-open? if Mix_CloseAudio drop 0 to mixer-open then ;

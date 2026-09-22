@@ -4,6 +4,8 @@ This EForth inspired implementation of Forth is bootstraped from a minimalist C 
 
 Compiled site documentation at [https://eforth.appspot.com](https://eforth.appspot.com/)
 
+[WORDS.md](WORDS.md) is a reference of the words of this build, generated from the interpreters themselves (`tools/words_reference.py`).
+
 ## Building from Source
 
 To build from source:

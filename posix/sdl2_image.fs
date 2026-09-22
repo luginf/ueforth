@@ -33,10 +33,6 @@ create srect 4 cells allot   ( source rectangle for sprite sheets )
 create isize 2 cells allot
 
 : try-image ( a n -- img, or 0 ) s>z renderer swap IMG_LoadTexture ;
-: base-name ( a n -- a' n' )   ( a file name without its directories )
-  { a n }  0 { cut }
-  n 0 ?do a i + c@ [char] / = if i 1+ to cut then loop
-  a cut +  n cut - ;
 \ A name with directories that is not found is tried again without them.
 : load-image ( a n -- img )
   2dup try-image  dup if nip nip exit then  drop

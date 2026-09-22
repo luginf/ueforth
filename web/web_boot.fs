@@ -19,4 +19,6 @@ needs ../common/phase2.fs
 needs ../common/tasks.fs
 needs utils.fs
 needs sdl2.fs
+needs ../common/abc.fs
+needs sdl2_abc.fs
 needs fini.fs

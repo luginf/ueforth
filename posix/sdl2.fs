@@ -229,6 +229,12 @@ create px 4 allot
   1 1 rect!  renderer rect SDL_PIXELFORMAT_ARGB8888 px 4 SDL_RenderReadPixels ?sdl
   px ul@ $ffffff and ;
 
+( ---- Files: a name is also looked for beside the program ---- )
+: base-name ( a n -- a' n' )   ( a file name without its directories )
+  { a n }  0 { cut }
+  n 0 ?do a i + c@ [char] / = if i 1+ to cut then loop
+  a cut +  n cut - ;
+
 ( ---- Timing ---- )
 : ticks ( -- ms ) SDL_GetTicks $ffffffff and ;
 0 value audio-hook   ( optional xt run by flip and delay to keep hits playing )
