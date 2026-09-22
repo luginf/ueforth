@@ -66,7 +66,7 @@ create track-program 0 , 32 , 40 , 73 ,      ( piano, bass, violin, flute )
 create track-base 60 , 36 , 60 , 72 ,        ( middle note shown in the roll )
 create track-colors cyan , orange , green , pink ,
 
-( ---- notes: pat-addr picks a byte in patterns; 0 means no note.  Bit 7 (0x80)
+( ---- notes: pat-addr picks a byte in patterns; 0 means no note.  Bit 7, $80,
   marks a "tie": the step continues the note that started earlier, rather than
   starting a new one; bits 0..6 hold the pitch, kept there too on a tie step
   so the byte alone always says what is sounding. ---- )
@@ -126,18 +126,18 @@ create pend-off-pitch 4 cells allot
 0 value fo-b   0 value fo-span
 : fire-ons ( pat step pos -- )
   { pat step pos }
-  pos smf-t - to ev-delta
   tracks 0 do
     pat i step note@ to fo-b
     fo-b 0<>  fo-b note-tie? 0=  and if
+      pos smf-t - to ev-delta
       fo-b note-pitch to ev-nn
-      ev-delta vlq,  $90 i + sb,  ev-nn sb,  90 sb,   0 to ev-delta
+      ev-delta vlq,  $90 i + sb,  ev-nn sb,  90 sb,
+      pos to smf-t
       pat i step note-span to fo-span
       pos fo-span 1- step-ticks * + note-ticks +  pend-off-tick i cells + !
       ev-nn pend-off-pitch i cells + !
     then
-  loop
-  pos to smf-t ;
+  loop ;   ( smf-t only moves when a byte is actually written, or deltas drift )
 
 0 value bs-pat   0 value bs-pos
 : build-smf ( -- )
@@ -163,7 +163,7 @@ create pend-off-pitch 4 cells allot
   n 8 rshift $ff and at 2 + c!   n $ff and at 3 + c! ;
 
 ( ---- the same song, in ABC notation: one voice per track, one bar per pattern.
-  A held note is written once with a length multiplier (C4 = four 1/16s), the
+  A held note is written once with a length multiplier, say C4 for four 1/16s, the
   steps it ties over are skipped, so the bar still totals 16 sixteenths. ---- )
 create abctxt 65536 allot   0 value abc-n
 : ac, ( char -- ) abctxt abc-n + c!  1 +to abc-n ;
@@ -287,7 +287,7 @@ create tmpl 64 allot
   2 = if 10 else 1 then
   swap -2 = if negate then instrument-step ;
 
-( ---- the length (in steps) a newly placed note gets: a 16th, 8th, quarter, half or whole ---- )
+( ---- the length in steps a newly placed note gets: a 16th, 8th, quarter, half or whole ---- )
 create note-lens 1 , 2 , 4 , 8 , 16 ,
 5 constant note-len-count
 2 value note-len-idx   ( default: 4 steps, a quarter note )
@@ -479,7 +479,28 @@ create semi-ratio 10000 , 10595 , 11225 , 11892 , 12599 , 13348 , 14142 , 14983 
 ( a small FluidSynth of its own, so a click sounds like the real instrument;
   lazy: the first preview opens it, silently falls back to beep-preview if no
   soundfont can be reached or the library is missing )
+z" libfluidsynth.so.3" shared-library fluidlib
+z" new_fluid_settings" 0 fluidlib fs-new-settings ( -- settings )
+z" new_fluid_synth" 1 fluidlib fs-new-synth ( settings -- synth )
+z" fluid_synth_sfload" 3 fluidlib fs-sfload ( synth z reset -- id )
+z" new_fluid_audio_driver" 2 fluidlib fs-new-audio-driver ( settings synth -- driver )
+z" fluid_synth_program_change" 3 fluidlib fs-program-change ( synth chan program -- n )
+z" fluid_synth_noteon" 4 fluidlib fs-noteon ( synth chan key vel -- n )
+z" fluid_synth_noteoff" 3 fluidlib fs-noteoff ( synth chan key -- n )
+z" Mix_GetSoundFonts" 0 sdlmix mix-get-soundfonts ( -- z )
+
 0 value fsynth   0 value fsynth-ready   0 value fsynth-failed
+0 value fsettings   0 value fdriver
+: fsynth-open ( -- )   ( throws if it cannot be set up )
+  mixer-init
+  mix-get-soundfonts { sfz }
+  sfz 0= if -1 throw then
+  fs-new-settings to fsettings
+  fsettings fs-new-synth to fsynth
+  fsynth sfz 1 fs-sfload sign-extend -1 = if -1 throw then
+  fsettings fsynth fs-new-audio-driver to fdriver
+  fdriver 0= if -1 throw then
+  -1 to fsynth-ready ;
 : fsynth-init ( -- )
   fsynth-ready if exit then
   fsynth-failed if exit then
@@ -493,6 +514,25 @@ create semi-ratio 10000 , 10595 , 11225 , 11892 , 12599 , 13348 , 14142 , 14983 
   else
     note beep-preview
   then ;
+
+0 value cf-i
+: clear-from ( pat trk stp -- )   ( clears stp, and any further steps still tied to it )
+  { pat trk stp }
+  0 pat trk stp note!
+  stp 1+ to cf-i
+  begin cf-i steps < while
+    pat trk cf-i note@ note-tie? 0= if exit then
+    0 pat trk cf-i note!
+    1 +to cf-i
+  repeat ;
+: note-start-at ( pat trk stp -- start-stp )
+  { pat trk stp }
+  begin stp 0 >  pat trk stp note@ note-tie?  and while -1 +to stp repeat
+  stp ;
+: clear-note ( pat trk stp -- )
+  { pat trk stp }
+  pat trk stp note-start-at { start }
+  pat trk start clear-from ;
 
 : set-note ( pitch pat trk stp len -- )
   { pitch pat trk stp len }

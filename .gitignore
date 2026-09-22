@@ -2,3 +2,4 @@ out
 build.ninja
 attic/jotblk/env
 __pycache__
+examples/sdl2_pianoroll.sf2
