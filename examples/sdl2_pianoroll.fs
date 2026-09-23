@@ -18,21 +18,23 @@
 \ (piano, bass, violin, flute), 16 steps per pattern. More patterns can be
 \ added and chained into a song longer than 16 steps. The song strip only
 \ shows as many steps as fit on screen; this small example does not scroll.
-\ A note can be longer than one step (sixteenth, eighth, quarter, half or
-\ whole), set with the note-length control; playing renders the whole song
-\ as a standard MIDI file and plays it through SDL2_mixer and FluidSynth, so
-\ it needs a soundfont (see sdl2_mixer.fs / SDL2.md). Clicking a note gives
-\ an instant preview, through a small persistent FluidSynth of its own so it
-\ uses the same instrument sound, falling back to the plain SDL2 beeper if
-\ no soundfont can be found.
+\ A click sets a single step; dragging across more steps (same row) merges
+\ them into one held note; dragging up or down within the same step instead
+\ stacks pitches into a chord. Separate clicks stay separate notes and
+\ retrigger. Playing renders the whole song as a standard MIDI file and plays
+\ it through SDL2_mixer and FluidSynth, so it needs a soundfont (see
+\ sdl2_mixer.fs / SDL2.md). Clicking a note gives an instant preview, through
+\ a small persistent FluidSynth of its own so it uses the same instrument
+\ sound, falling back to the plain SDL2 beeper if no soundfont can be found.
 \ "SAV" exports the song as both a .mid and a .abc file.
 \ Mouse:
-\   grid            click sets or clears a note (drag to paint or erase)
+\   grid            click sets a note; drag sideways to hold it longer, up or
+\                    down (same step) to add notes to a chord; right click
+\                    (or drag) erases
 \   piano keys      click to preview a pitch, without changing the pattern
 \   track tabs      1 2 3 4, choose which track's roll is shown and edited
 \   instrument -/+  the General MIDI program (0..127) of the current track,
 \                   1 step with the left button, 10 with the right
-\   note length -/+ how many steps a newly placed note lasts
 \   pattern tabs    choose which pattern is shown and edited; + adds a new one
 \   song strip      click a step to change which pattern plays there; + repeats
 \                   the current pattern at the end of the song
@@ -43,7 +45,7 @@
 \ Keyboard: space play/stop, up/down tempo, 1-4 pick the track, esc quit.
 \ Editing (a note, an instrument, a pattern, the song or the tempo) stops playback, since
 \ the song is only rendered to sound when play starts: press play again to
-\ hear the change.
+\ hear the change. A darker line marks every 4th step, one beat in 4/4.
 
 sdl2
 sdl2-mixer
@@ -52,10 +54,12 @@ s" sdl2_pianoroll.sf2" soundfont? drop   \ optional, a soundfont beside this fil
 ( ---- sizes and the pattern bank ---- )
 16 constant steps            4 constant tracks
 8 constant max-patterns      32 constant max-song
-18 constant roll-rows
+18 constant roll-rows        4 constant chord-size   ( notes a single step can hold )
 
-create patterns  max-patterns tracks * steps * allot
-patterns max-patterns tracks * steps * erase
+create patterns  max-patterns tracks * steps * chord-size * allot
+patterns max-patterns tracks * steps * chord-size * erase
+create ties  max-patterns tracks * steps * allot
+ties max-patterns tracks * steps * erase
 create song max-song allot   song max-song erase
 1 value song-len   1 value pattern-count
 0 value cur-track   0 value cur-pattern
@@ -66,23 +70,55 @@ create track-program 0 , 32 , 40 , 73 ,      ( piano, bass, violin, flute )
 create track-base 60 , 36 , 60 , 72 ,        ( middle note shown in the roll )
 create track-colors cyan , orange , green , pink ,
 
-( ---- notes: pat-addr picks a byte in patterns; 0 means no note.  Bit 7, $80,
-  marks a "tie": the step continues the note that started earlier, rather than
-  starting a new one; bits 0..6 hold the pitch, kept there too on a tie step
-  so the byte alone always says what is sounding. ---- )
-: pat-addr ( pat trk stp -- addr )
-  { p t s } p tracks * t + steps * s + patterns + ;
-: note@ ( pat trk stp -- n ) pat-addr c@ ;
-: note! ( n pat trk stp -- )
-  { n pat trk stp } n  pat trk stp pat-addr  c! ;
-: note-pitch ( byte -- pitch ) $7f and ;
-: note-tie? ( byte -- f ) $80 and 0<> ;
-: note-span ( pat trk stp -- n )   ( 1 + how many further steps tie to it, bounded by the pattern )
+( ---- a step: up to chord-size pitches, 0 = unused, plus one tie bit of its
+  own saying whether the step continues the previous one, a held note or a
+  held chord, rather than starting fresh.  a-* words work on a chord's own
+  chord-size bytes directly; the wrappers below pick out those bytes for a
+  given pattern, track and step. ---- )
+: chord-addr ( pat trk stp -- addr )
+  { p t s } p tracks * t + steps * s + chord-size * patterns + ;
+: tie-addr ( pat trk stp -- addr )
+  { p t s } p tracks * t + steps * s + ties + ;
+: tie@ ( pat trk stp -- f ) tie-addr c@ 0<> ;
+: tie! ( f pat trk stp -- ) tie-addr c! ;
+
+0 value ah-found
+: a-has? ( pitch a -- f )
+  { pitch a }
+  0 to ah-found
+  chord-size 0 ?do a i + c@ pitch = if -1 to ah-found then loop
+  ah-found ;
+: a-add ( pitch a -- )   ( adds to the first free slot; already there or full does nothing )
+  { pitch a }
+  pitch a a-has? if exit then
+  chord-size 0 ?do
+    a i + c@ 0= if pitch a i + c!  unloop exit then
+  loop ;
+: a-remove ( pitch a -- )
+  { pitch a }
+  chord-size 0 ?do a i + c@ pitch = if 0 a i + c! then loop ;
+0 value ae-any
+: a-empty? ( a -- f )
+  { a }
+  0 to ae-any
+  chord-size 0 ?do a i + c@ 0<> if -1 to ae-any then loop
+  ae-any 0= ;
+: a-copy ( src dst -- )
+  { src dst } chord-size 0 ?do src i + c@ dst i + c! loop ;
+
+: chord-has? ( pitch pat trk stp -- f ) chord-addr a-has? ;
+: chord-add ( pitch pat trk stp -- ) chord-addr a-add ;
+: chord-remove ( pitch pat trk stp -- ) chord-addr a-remove ;
+: chord-empty? ( pat trk stp -- f ) chord-addr a-empty? ;
+
+: tie-span ( pat trk stp -- n )   ( 1 + how many further steps tie to it, bounded by the pattern )
   { pat trk stp } 1 { n }
-  begin
-    stp n + steps <   pat trk stp n + note@ note-tie?  and
-  while 1 +to n repeat
+  begin stp n + steps <  pat trk stp n + tie@  and while 1 +to n repeat
   n ;
+: span-start ( pat trk stp -- start )
+  { pat trk stp }
+  begin stp 0 >  pat trk stp tie@  and while -1 +to stp repeat
+  stp ;
 
 ( ---- the tune as a standard MIDI file: one track, one channel per voice ---- )
 create smf 65536 allot   0 value smf-n   0 value smf-t   0 value smf-len
@@ -97,52 +133,71 @@ create smf 65536 allot   0 value smf-n   0 value smf-t   0 value smf-len
 
 120 constant step-ticks   100 constant note-ticks   ( 480 ticks per quarter )
 
-( a note-off due per channel, fired once the step that reaches it comes up )
+( a note-off due per channel: the tick, and up to chord-size pitches to end )
 create pend-off-tick 4 cells allot
-create pend-off-pitch 4 cells allot
+create pend-off-chord 4 chord-size * allot
 
-0 value ev-nn   0 value ev-delta   0 value ev-due
+0 value ev-delta   0 value ev-due   0 value fo-ch   0 value fo-p
+0 value fo-span   0 value fo-ca
 : fire-offs ( pos -- )   ( pos: the tick this step starts at; fires any note-off due by the next one )
   { pos }
   tracks 0 do
     pend-off-tick i cells + @ to ev-due
     ev-due 0<>  ev-due pos step-ticks + <=  and if
-      ev-due smf-t - to ev-delta
-      ev-delta vlq,  $80 i + sb,  pend-off-pitch i cells + @ sb,  0 sb,   0 to ev-delta
-      ev-due to smf-t
-      0 pend-off-tick i cells + !
+      i to fo-ch
+      chord-size 0 ?do
+        fo-ch chord-size * i + pend-off-chord + c@ to fo-p
+        fo-p 0<> if
+          ev-due smf-t - to ev-delta
+          ev-delta vlq,  $80 fo-ch + sb,  fo-p sb,  0 sb,
+          ev-due to smf-t
+        then
+      loop
+      0 pend-off-tick fo-ch cells + !
     then
   loop ;
 : flush-offs ( -- )   ( fires whatever note-offs are still pending, at the very end )
   tracks 0 do
     pend-off-tick i cells + @ to ev-due
     ev-due 0<> if
-      ev-due smf-t - to ev-delta
-      ev-delta vlq,  $80 i + sb,  pend-off-pitch i cells + @ sb,  0 sb,   0 to ev-delta
-      ev-due to smf-t
-      0 pend-off-tick i cells + !
+      i to fo-ch
+      chord-size 0 ?do
+        fo-ch chord-size * i + pend-off-chord + c@ to fo-p
+        fo-p 0<> if
+          ev-due smf-t - to ev-delta
+          ev-delta vlq,  $80 fo-ch + sb,  fo-p sb,  0 sb,
+          ev-due to smf-t
+        then
+      loop
+      0 pend-off-tick fo-ch cells + !
     then
   loop ;
-0 value fo-b   0 value fo-span
 : fire-ons ( pat step pos -- )
   { pat step pos }
   tracks 0 do
-    pat i step note@ to fo-b
-    fo-b 0<>  fo-b note-tie? 0=  and if
-      pos smf-t - to ev-delta
-      fo-b note-pitch to ev-nn
-      ev-delta vlq,  $90 i + sb,  ev-nn sb,  90 sb,
-      pos to smf-t
-      pat i step note-span to fo-span
-      pos fo-span 1- step-ticks * + note-ticks +  pend-off-tick i cells + !
-      ev-nn pend-off-pitch i cells + !
+    pat i step tie@ 0=  pat i step chord-empty? 0=  and if
+      i to fo-ch
+      pat i step chord-addr to fo-ca
+      pat i step tie-span to fo-span
+      chord-size 0 ?do
+        fo-ca i + c@ to fo-p
+        fo-p 0<> if
+          pos smf-t - to ev-delta
+          ev-delta vlq,  $90 fo-ch + sb,  fo-p sb,  90 sb,
+          pos to smf-t
+        then
+      loop
+      chord-size 0 ?do
+        fo-ca i + c@  fo-ch chord-size * i + pend-off-chord + c!
+      loop
+      pos fo-span 1- step-ticks * + note-ticks +  pend-off-tick fo-ch cells + !
     then
   loop ;   ( smf-t only moves when a byte is actually written, or deltas drift )
 
 0 value bs-pat   0 value bs-pos
 : build-smf ( -- )
   0 to smf-n   0 to smf-t   0 to bs-pos
-  pend-off-tick 4 cells erase   pend-off-pitch 4 cells erase
+  pend-off-tick 4 cells erase   pend-off-chord 4 chord-size * erase
   77 sb, 84 sb, 104 sb, 100 sb,   6 sbe32,   0 sb, 0 sb,   0 sb, 1 sb,   1 sb, $e0 sb,
   77 sb, 84 sb, 114 sb, 107 sb,   smf-n to smf-len   0 sbe32,
   0 vlq,  $ff sb, $51 sb, 3 sb,
@@ -157,14 +212,15 @@ create pend-off-pitch 4 cells allot
     loop
   loop
   flush-offs
-  0 vlq,  $ff sb, $2f sb, 0 sb,
+  song-len steps * step-ticks *  smf-t - vlq,  $ff sb, $2f sb, 0 sb,
   smf-n smf-len - 4 -  smf-len smf + { at }  { n }
   n 24 rshift $ff and at c!   n 16 rshift $ff and at 1+ c!
   n 8 rshift $ff and at 2 + c!   n $ff and at 3 + c! ;
 
 ( ---- the same song, in ABC notation: one voice per track, one bar per pattern.
-  A held note is written once with a length multiplier, say C4 for four 1/16s, the
-  steps it ties over are skipped, so the bar still totals 16 sixteenths. ---- )
+  A held note is written once with a length multiplier, say C4 for four 1/16s;
+  a chord is bracketed, say [CEG]2; the steps it ties over are skipped, so the
+  bar still totals 16 sixteenths. ---- )
 create abctxt 65536 allot   0 value abc-n
 : ac, ( char -- ) abctxt abc-n + c!  1 +to abc-n ;
 : as, ( a n -- ) over + swap ?do i c@ ac, loop ;
@@ -181,8 +237,7 @@ create abc-letter  0 , 0 , 1 , 1 , 2 , 3 , 3 , 4 , 4 , 5 , 5 , 6 ,
   60 -  to abc-semi   0 to abc-oct
   begin abc-semi 0< while 12 +to abc-semi  -1 +to abc-oct  repeat
   begin abc-semi 11 > while -12 +to abc-semi  1 +to abc-oct  repeat ;
-: emit-note ( note len -- )
-  { len }
+: emit-note-raw ( note -- )
   abc-split
   abc-semi cells abc-sharp + @ if [char] ^ ac, then
   abc-semi cells abc-letter + @ cells abc-letters + @ { ch }
@@ -190,10 +245,21 @@ create abc-letter  0 , 0 , 1 , 1 , 2 , 3 , 3 , 4 , 4 , 5 , 5 , 6 ,
     ch 32 + ac,   abc-oct 1 - 0 ?do [char] ' ac, loop
   else
     ch ac,   abc-oct negate 0 ?do [char] , ac, loop
-  then
+  then ;
+0 value ec-count   0 value ec-p
+: emit-chord ( ca len -- )
+  { ca len }
+  0 to ec-count
+  chord-size 0 ?do ca i + c@ 0<> if 1 +to ec-count then loop
+  ec-count 1 > if [char] [ ac, then
+  chord-size 0 ?do
+    ca i + c@ to ec-p
+    ec-p 0<> if ec-p emit-note-raw then
+  loop
+  ec-count 1 > if [char] ] ac, then
   len 1 > if len an, then ;
 
-0 value at-pat   0 value at-nn   0 value at-span
+0 value at-pat   0 value at-span   0 value at-ca
 : abc-track ( trk -- )
   { trk }
   s" V:" as,  trk 1+ an,  al,
@@ -201,12 +267,14 @@ create abc-letter  0 , 0 , 1 , 1 , 2 , 3 , 3 , 4 , 4 , 5 , 5 , 6 ,
   song-len 0 do
     i song + c@ to at-pat
     steps 0 do
-      at-pat trk i note@ to at-nn
-      at-nn 0<>  at-nn note-tie? 0=  and if
-        at-pat trk i note-span to at-span
-        at-nn note-pitch at-span emit-note
-      else
-        at-nn 0= if [char] z ac, then
+      at-pat trk i tie@ 0= if
+        at-pat trk i chord-empty? if
+          [char] z ac,
+        else
+          at-pat trk i chord-addr to at-ca
+          at-pat trk i tie-span to at-span
+          at-ca at-span emit-chord
+        then
       then
     loop
     [char] | ac,  al,
@@ -287,23 +355,6 @@ create tmpl 64 allot
   2 = if 10 else 1 then
   swap -2 = if negate then instrument-step ;
 
-( ---- the length in steps a newly placed note gets: a 16th, 8th, quarter, half or whole ---- )
-create note-lens 1 , 2 , 4 , 8 , 16 ,
-5 constant note-len-count
-2 value note-len-idx   ( default: 4 steps, a quarter note )
-: note-len ( -- n ) note-len-idx cells note-lens + @ ;
-: note-len-step ( d -- )
-  stop-if-playing
-  note-len-idx + 0 max note-len-count 1- min to note-len-idx ;
-: run-note-len ( id b -- )   ( id -4 lowers, -5 raises, either button, 1 step )
-  drop  -4 = if -1 else 1 then note-len-step ;
-: note-len-label ( -- a n )
-  note-len-idx 0 = if s" SIXTEENTH" exit then
-  note-len-idx 1 = if s" EIGHTH" exit then
-  note-len-idx 2 = if s" QUARTER" exit then
-  note-len-idx 3 = if s" HALF" exit then
-  s" WHOLE" ;
-
 ( ---- the 128 General MIDI instrument names, for the display only ---- )
 13 constant name-w
 create gm-names 128 name-w * allot
@@ -358,7 +409,8 @@ s" Applause" 126 def-instr   s" Gunshot" 127 def-instr
 
 : clear-pattern
   stop-if-playing
-  cur-pattern tracks * steps * patterns +  tracks steps *  erase ;
+  cur-pattern tracks * steps * chord-size * patterns +  tracks steps * chord-size *  erase
+  cur-pattern tracks * steps * ties +  tracks steps *  erase ;
 
 : pick-pattern ( n -- )   ( n = pattern-count means "new pattern" )
   dup pattern-count = if
@@ -434,15 +486,6 @@ s" Applause" 126 def-instr   s" Gunshot" 127 def-instr
   instr-plus-at if -3 exit then
   0 ;
 
-( The note length, next to the pattern tabs )
-220 constant nlen-x   18 constant nlen-w   252 constant nlen-x2
-: nlen-minus-at ( -- f ) nlen-x 48 nlen-w 14 inside? ;
-: nlen-plus-at ( -- f ) nlen-x2 48 nlen-w 14 inside? ;
-: note-len-btn-at ( -- id )   ( -4 the minus button, -5 the plus one, else 0 )
-  nlen-minus-at if -4 exit then
-  nlen-plus-at if -5 exit then
-  0 ;
-
 ( The buttons of the top bar: play/stop, tempo -, tempo +, clear, save, quit )
 create btn-x 8 , 44 , 98 , 140 , 182 , 286 ,
 create btn-w 24 , 20 , 20 , 32 , 32 , 26 ,
@@ -505,8 +548,8 @@ z" Mix_GetSoundFonts" 0 sdlmix mix-get-soundfonts ( -- z )
   fsynth-ready if exit then
   fsynth-failed if exit then
   ['] fsynth-open catch if -1 to fsynth-failed then ;
-: preview-note ( row -- )
-  row-note { note }
+: preview-pitch ( note -- )
+  { note }
   fsynth-init
   fsynth-ready if
     fsynth cur-track instrument fs-program-change drop
@@ -514,62 +557,69 @@ z" Mix_GetSoundFonts" 0 sdlmix mix-get-soundfonts ( -- z )
   else
     note beep-preview
   then ;
+: preview-note ( row -- ) row-note preview-pitch ;
 
-0 value cf-i
-: clear-from ( pat trk stp -- )   ( clears stp, and any further steps still tied to it )
-  { pat trk stp }
-  0 pat trk stp note!
-  stp 1+ to cf-i
-  begin cf-i steps < while
-    pat trk cf-i note@ note-tie? 0= if exit then
-    0 pat trk cf-i note!
-    1 +to cf-i
+( ---- editing: click adds a note; dragging sideways ties it longer, up or
+  down at the same step stacks a chord; right click erases ---- )
+0 value ep-i   0 value ep-first
+: erase-pitch ( pitch pat trk stp -- )
+  { pitch pat trk stp }
+  pat trk stp span-start to ep-i
+  -1 to ep-first
+  begin
+    ep-i steps <  ep-first  pat trk ep-i tie@  or  and
+  while
+    pitch pat trk ep-i chord-remove
+    pat trk ep-i chord-empty? if 0 pat trk ep-i tie! then
+    0 to ep-first
+    1 +to ep-i
   repeat ;
-: note-start-at ( pat trk stp -- start-stp )
-  { pat trk stp }
-  begin stp 0 >  pat trk stp note@ note-tie?  and while -1 +to stp repeat
-  stp ;
-: clear-note ( pat trk stp -- )
-  { pat trk stp }
-  pat trk stp note-start-at { start }
-  pat trk start clear-from ;
 
-: set-note ( pitch pat trk stp len -- )
-  { pitch pat trk stp len }
-  pat trk stp clear-from
-  pitch pat trk stp note!
-  len 1 ?do
-    stp i + steps < if pitch $80 or pat trk stp i + note! then
-  loop ;
-: note-matches? ( row col -- f )
-  { row col }
-  cur-pattern cur-track col note@ note-pitch  row row-note = ;
-: set-cell ( row col -- )
-  { row col }
+: place-pitch ( pitch pat trk stp -- )
+  { pitch pat trk stp }
+  pitch pat trk stp chord-has? if exit then
   stop-if-playing
-  cur-pattern cur-track col note@ note-pitch  row row-note <>  if row preview-note then
-  row row-note cur-pattern cur-track col note-len set-note ;
-: clear-cell ( col -- )
-  { col } stop-if-playing cur-pattern cur-track col clear-note ;
+  pitch pat trk stp chord-add
+  pitch preview-pitch ;
 
-0 value paint-write
+0 value et-c
+: extend-to ( pat trk anchor from dst -- )   ( ties and copies the anchor's chord onto steps from+1..dst )
+  { pat trk anchor from dst }
+  pat trk anchor chord-addr { src }
+  from 1+ to et-c
+  begin et-c dst <= while
+    -1 pat trk et-c tie!
+    src pat trk et-c chord-addr a-copy
+    1 +to et-c
+  repeat ;
+
+-1 value anchor-col   -1 value drag-col   0 value painting   0 value erasing
 : begin-paint ( row col -- )
   { row col }
-  row col note-matches? if
-    0 to paint-write   col clear-cell
-  else
-    -1 to paint-write   row col set-cell
-  then ;
+  col to anchor-col   col to drag-col
+  row row-note cur-pattern cur-track col place-pitch ;
 : continue-paint ( row col -- )
-  paint-write if set-cell else drop clear-cell then ;
+  { row col }
+  col anchor-col = if
+    row row-note cur-pattern cur-track anchor-col place-pitch
+    cur-pattern cur-track anchor-col anchor-col drag-col extend-to
+  else
+    col drag-col > if
+      cur-pattern cur-track anchor-col drag-col col extend-to
+      col to drag-col
+    then
+  then ;
+: erase-cell ( row col -- )
+  { row col }
+  stop-if-playing
+  row row-note cur-pattern cur-track col erase-pitch ;
 
 ( ---- mouse and keyboard ---- )
-0 value was-btn   0 value painting
+0 value was-btn
 -1 value btn-hover   -1 value held-btn   0 value repeat-at
 -1 value hover-row   -1 value hover-col   -1 value key-hover
 -1 value track-hover   -1 value pat-hover   -1 value song-hover
 0 value instr-hover   0 value held-instr   0 value instr-repeat-at
-0 value nlen-hover    0 value held-nlen    0 value nlen-repeat-at
 
 : mouse-btn ( -- n )
   LEFT-BUTTON pressed? if 1 exit then
@@ -599,27 +649,16 @@ z" Mix_GetSoundFonts" 0 sdlmix mix-get-soundfonts ( -- z )
   ticks instr-repeat-at - 0< if drop exit then
   held-instr swap run-instrument   80 +to instr-repeat-at ;
 
-: press-note-len ( id b -- )
-  { id b }
-  id to held-nlen   ticks 400 + to nlen-repeat-at
-  id b run-note-len ;
-: repeat-note-len ( b -- )
-  held-nlen 0= if drop exit then
-  nlen-hover held-nlen <> if drop exit then
-  ticks nlen-repeat-at - 0< if drop exit then
-  held-nlen swap run-note-len   150 +to nlen-repeat-at ;
-
 : handle-mouse
   row-at to hover-row   col-at to hover-col   key-at to key-hover
   track-tab-at to track-hover   pattern-tab-at to pat-hover   song-tab-at to song-hover
-  button-at to btn-hover   instrument-btn-at to instr-hover   note-len-btn-at to nlen-hover
+  button-at to btn-hover   instrument-btn-at to instr-hover
   mouse-btn { b }
-  b 0= if 0 to painting  -1 to held-btn  0 to held-instr  0 to held-nlen then
+  b 0= if 0 to painting  0 to erasing  -1 to held-btn  0 to held-instr then
   b was-btn 0= and { fresh }
   fresh if
     btn-hover 0 >= if btn-hover b press-button then
     instr-hover 0<> if instr-hover b press-instrument then
-    nlen-hover 0<> if nlen-hover b press-note-len then
   then
   fresh b 1 = and if
     track-hover 0 >= if track-hover to cur-track then
@@ -630,10 +669,18 @@ z" Mix_GetSoundFonts" 0 sdlmix mix-get-soundfonts ( -- z )
       hover-row hover-col begin-paint   -1 to painting
     then
   then
+  fresh b 2 = and if
+    hover-row 0 >= hover-col 0 >= and if
+      hover-row hover-col erase-cell   -1 to erasing
+    then
+  then
   painting hover-row 0 >= and hover-col 0 >= and if
     hover-row hover-col continue-paint
   then
-  b if b repeat-button  b repeat-instrument  b repeat-note-len then
+  erasing hover-row 0 >= and hover-col 0 >= and if
+    hover-row hover-col erase-cell
+  then
+  b if b repeat-button  b repeat-instrument then
   b to was-btn ;
 
 create was 256 allot   was 256 erase
@@ -697,15 +744,6 @@ create digit-bits
   white color   instrument  instr-x 24 +  33  2 draw-num3
   white color   instrument-name  instr-x2 24 +  33  1 draw-text ;
 
-: draw-note-len
-  nlen-hover -4 = if $5a6aa0 else $28325a then color
-  nlen-x 48 nlen-w 14 box
-  white color   nlen-x 48 minus-at
-  nlen-hover -5 = if $5a6aa0 else $28325a then color
-  nlen-x2 48 nlen-w 14 box
-  white color   nlen-x2 48 plus-at
-  white color   note-len-label  nlen-x2 24 +  53  1 draw-text ;
-
 : draw-tab { label active x y }
   active if $3a4680 else $1c2440 then color
   x y 18 14 box
@@ -745,25 +783,31 @@ create digit-bits
   playing 0= if drop 0 exit then
   song-pos song + c@ cur-pattern <> if drop 0 exit then
   pat-step = ;
-0 value cc-nn
 : cell-color ( row col -- $rrggbb )
   { row col }
-  cur-pattern cur-track col note@ to cc-nn
-  cc-nn note-pitch row row-note = if
-    col playing-here? if white else
-      cc-nn note-tie? if track-colors cur-track cells + @ $7f7f7f and
-      else track-colors cur-track cells + @ then
-    then
+  row row-note cur-pattern cur-track col chord-has? if
+    col playing-here? if white else track-colors cur-track cells + @ then
   else
     row row-note black-key? if $181818 else $242424 then
   then ;
+: cell-width ( row col -- w )   ( a held note reaches into the gap to fuse with the next cell )
+  { row col }
+  col 1+ steps <
+  row row-note cur-pattern cur-track col chord-has?  and
+  cur-pattern cur-track col 1+ tie@  and
+  if col-w else col-box then ;
 : draw-grid
   roll-rows 0 do
     steps 0 do
       j i cell-color color
-      i col-w * grid-x +   j row-h * grid-y +   col-box row-box box
+      i col-w * grid-x +   j row-h * grid-y +   j i cell-width  row-box  box
     loop
   loop ;
+: draw-beat-lines   ( a darker line every 4 steps, one beat in 4/4 )
+  $3a4a80 color
+  steps 4 do
+    grid-x i col-w * +  2 -  grid-y  2  roll-rows row-h *  box
+  4 +loop ;
 
 : icon-play { x w }
   x w 12 - 2 / + { cx }
@@ -807,8 +851,8 @@ create digit-bits
   $101830 color cls
   draw-buttons
   white color   242 10 2 draw-bpm
-  draw-track-tabs draw-pattern-tabs draw-song-tabs draw-instrument draw-note-len
-  draw-keys draw-grid
+  draw-track-tabs draw-pattern-tabs draw-song-tabs draw-instrument
+  draw-keys draw-beat-lines draw-grid
   flip ;
 
 : frame-step
@@ -820,14 +864,24 @@ create digit-bits
   dt 8 < if 8 dt - delay then ;
 : run begin frame-step quit? until close-screen ;
 
+0 value dn-i
+: demo-note ( pitch pat trk stp len -- )
+  { pitch pat trk stp len }
+  pitch pat trk stp chord-add
+  stp 1+ to dn-i
+  begin dn-i stp len + <  dn-i steps <  and while
+    -1 pat trk dn-i tie!
+    pat trk stp chord-addr  pat trk dn-i chord-addr  a-copy
+    1 +to dn-i
+  repeat ;
 : demo-pattern
-  60 0 0 0 4 set-note   64 0 0 4 2 set-note   67 0 0 8 2 set-note   64 0 0 12 4 set-note
-  36 0 1 0 4 set-note   36 0 1 4 4 set-note   43 0 1 8 4 set-note   36 0 1 12 4 set-note
-  72 0 2 2 2 set-note   76 0 2 6 2 set-note   79 0 2 10 2 set-note   76 0 2 14 2 set-note
-  84 0 3 0 8 set-note ;
+  60 0 0 0 4 demo-note   64 0 0 4 2 demo-note   67 0 0 8 2 demo-note   64 0 0 12 4 demo-note
+  36 0 1 0 4 demo-note   36 0 1 4 4 demo-note   43 0 1 8 4 demo-note   36 0 1 12 4 demo-note
+  72 0 2 2 2 demo-note   76 0 2 6 2 demo-note   79 0 2 10 2 demo-note   76 0 2 14 2 demo-note
+  84 0 3 0 8 demo-note   67 0 3 0 8 demo-note ;   ( a chord: two notes together on the flute track )
 
 ." click: grid notes, tabs (track/pattern/song, + adds), buttons  space: play/stop  up/down: tempo  1-4: track  esc: quit" cr
-340 constant field-w   260 constant field-h
+320 constant field-w   260 constant field-h
 3 to zoom
 field-w field-h screen
 s" Piano roll" title
